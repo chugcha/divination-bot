@@ -10,7 +10,8 @@ def create_db(db_path: str = "divinations.db"):
         title TEXT NOT NULL,
         author TEXT NOT NULL,
         text TEXT,
-        words_n INTEGER
+        words_n INTEGER,
+        total_pages INTEGER DEFAULT 0
     );
     """)
     cursor.execute("""
@@ -18,6 +19,7 @@ def create_db(db_path: str = "divinations.db"):
         page_id INTEGER PRIMARY KEY AUTOINCREMENT,
         book_id INTEGER NOT NULL,
         page_n INTEGER NOT NULL,
+        total_lines INTEGER DEFAULT 0,
         FOREIGN KEY (book_id) REFERENCES Books(book_id) ON DELETE CASCADE,
         UNIQUE(book_id, page_n)
     );
