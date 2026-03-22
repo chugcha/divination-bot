@@ -8,7 +8,7 @@ def create_db(db_path: str = "divinations.db"):
     CREATE TABLE IF NOT EXISTS Books (
         book_id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
-        author TEXT NOT NULL,
+        author TEXT,
         text TEXT,
         words_n INTEGER,
         total_pages INTEGER DEFAULT 0
