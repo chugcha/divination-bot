@@ -1,0 +1,260 @@
+import telebot
+from telebot import types
+import sqlite3
+from typing import List, Tuple, Dict
+from flask import Flask, request
+
+from context import find_sentence
+from unique import unique_prediction
+from stats import all_stats
+
+token = '8788891470:AAFr487oaCLT4rj2EU2lg6QNFahORJo0W_o'
+bot = telebot.TeleBot(token)
+db_path = 'divinations.db'
+user_state = {}
+
+app = Flask(__name__)
+
+webhook_url = "https://abelyayeva.pythonanywhere.com/" + token
+
+def get_or_create_user(telegram_id: int) -> int:
+    '''
+    Получает или создаёт пользователя в базе данных.
+
+    Параметр:
+        telegram_id(int): Telegram ID пользователя
+
+    Возвращает внутренний user_id из базы данных.
+    '''
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM Users WHERE telegram_id = ?", (telegram_id,))
+    result = cursor.fetchone()
+    if result:
+        user_id = result[0]
+    else:
+        cursor.execute(
+            "INSERT INTO Users (telegram_id) VALUES (?)",
+            (telegram_id,)
+        )
+        user_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return user_id
+
+def get_books() -> List[Tuple[int, str]]:
+    '''
+    Получает список всех книг из базы данных.
+
+    Не получает ничего на вход.
+
+    Возвращает список кортежей (book_id, title).
+    '''
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT book_id, title FROM Books")
+    books = cursor.fetchall()
+    conn.close()
+    return books
+
+def get_book_structure(book_id: int) -> Dict[int, List[str]]:
+    '''
+    Загружает структуру книги: страницы и строки.
+
+    Параметр:
+        book_id(int): Идентификатор книги
+
+    Возвращает словарь {номер_страницы: [строки]}.
+    '''
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT p.page_n, l.line_n, l.line_text
+        FROM Pages p
+        JOIN Lines l ON p.page_id = l.page_id
+        WHERE p.book_id = ?
+        ORDER BY p.page_n, l.line_n
+    """, (book_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    book = {}
+    for page_n, line_n, text in rows:
+        book.setdefault(page_n - 1, []).append(text)
+    return book
+
+def get_book_lemmas(book_id: int) -> List[str]:
+    '''
+    Получает леммы слов книги из базы данных.
+
+    Параметр:
+        book_id(int): Идентификатор книги
+
+    Возвращает список лемм.
+    '''
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT text FROM Books WHERE book_id = ?", (book_id,))
+    lemmas = cursor.fetchone()[0]
+    conn.close()
+    return lemmas.split()
+
+def main_menu(chat_id: int) -> None:
+    '''
+    Отображает главное меню.
+
+    Параметр:
+        chat_id(int): ID чата
+
+    Ничего не возвращает
+    '''
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add('Получить предсказание', 'Общая статистика')
+    bot.send_message(chat_id, 'Готовы получить предсказание?', reply_markup=markup)
+
+def back_button() -> types.ReplyKeyboardMarkup:
+    '''
+    Создаёт кнопку 'Назад'.
+    '''
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("Назад")
+    return markup
+
+@bot.message_handler(commands=['start'])
+def start(message: types.Message) -> None:
+    '''
+    Обрабатывает команду /start.
+    '''
+    main_menu(message.chat.id)
+
+@bot.message_handler(func=lambda m: m.text == "Общая статистика")
+def handle_stats(message: types.Message) -> None:
+    '''
+    Обрабатывает запрос общей статистики.
+    '''
+    chat_id = message.chat.id
+    user_id = get_or_create_user(chat_id)
+    text_result, plot_buf = all_stats(user_id)
+    bot.send_message(chat_id, text_result)
+    if plot_buf:
+        bot.send_photo(chat_id, plot_buf)
+    else:
+        bot.send_message(chat_id, "К сожалению, нам пока недостаточно данных для графика:(")
+
+@bot.message_handler(func=lambda m: m.text == "Получить предсказание")
+def ask_question(message: types.Message) -> None:
+    '''
+    Обрабатывает начало процесса получения предсказания.
+    '''
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("Я придумал вопрос", "Назад")
+    bot.send_message(message.chat.id, "Придумайте вопрос:", reply_markup=markup)
+
+@bot.message_handler(func=lambda m: m.text == "Я придумал вопрос")
+def choose_book(message: types.Message) -> None:
+    '''
+    Обрабатывает выбор книги для предсказания.
+    '''
+    books = get_books()
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    for _, title in books:
+        markup.add(title)
+    markup.add("Назад")
+    user_state[message.chat.id] = {}
+    bot.send_message(message.chat.id, "Выберите книгу:", reply_markup=markup)
+
+@bot.message_handler(func=lambda m: True)
+def handler(message: types.Message) -> None:
+    '''
+    Обрабатывает выбор страницы, строки и действий.
+    '''
+    chat_id = message.chat.id
+    text = message.text
+    if text == "Назад":
+        user_state.pop(chat_id, None)
+        main_menu(chat_id)
+        return
+    if chat_id not in user_state:
+        return
+    state = user_state[chat_id]
+    if "user_id" not in state:
+        state["user_id"] = get_or_create_user(chat_id)
+    if "book_id" not in state:
+        for book_id, title in get_books():
+            if text == title:
+                state["book_id"] = book_id
+                state["book"] = get_book_structure(book_id)
+                bot.send_message(
+                    chat_id,
+                    f"В книге {len(state['book'])} страниц. Введите номер страницы:",
+                    reply_markup=back_button()
+                )
+                return
+    if "page" not in state:
+        if not text.isdigit():
+            bot.send_message(chat_id, "Вы ввели что-то не то:( Введите просто число, входящее в диапазон:")
+            return
+        page = int(text)
+        book = state["book"]
+        if page < 1 or page > len(book):
+            bot.send_message(chat_id, f"Введите номер страницы от 1 до {len(book)}")
+            return
+        state["page"] = page
+        bot.send_message(
+            chat_id,
+            f"На этой странице {len(book[page - 1])} строк. Введите номер строки:",
+            reply_markup=back_button()
+        )
+        return
+    if "line" not in state:
+        if not text.isdigit():
+            bot.send_message(chat_id, "Вы ввели что-то не то:( Введите просто число, входящее в диапазон:")
+            return
+        line = int(text)
+        book = state["book"]
+        page = state["page"]
+        if line < 1 or line > len(book[page - 1]):
+            bot.send_message(chat_id, f"Введите номер строки от 1 до {len(book[page - 1])}")
+            return
+        state["line"] = line
+        sentence = find_sentence(book, page, line)
+        state["sentence"] = sentence
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add("Уникальность", "Ещё предсказание")
+        markup.add("Назад")
+        bot.send_message(
+            chat_id,
+            f'Книга говорит:\n\n"{sentence}"\n\nЧто вы хотите узнать о вашем предсказании?',
+            reply_markup=markup
+        )
+        return
+    sentence = state["sentence"]
+    if text == "Уникальность":
+        lemmas = get_book_lemmas(state["book_id"])
+        score = unique_prediction(sentence, lemmas)
+        bot.send_message(chat_id, f"Частотность вашего предсказания относительно всей книги: {round(score, 5)}")
+    elif text == "Ещё предсказание":
+        user_state.pop(chat_id)
+        ask_question(message)
+    elif text == "Назад":
+        user_state.pop(chat_id, None)
+        main_menu(chat_id)
+        return
+
+@app.route('/' + token, methods=['GET', 'POST'])
+def webhook():
+    if request.method == 'POST':
+        if request.headers.get('content-type') == 'application/json':
+            json_string = request.get_data().decode('utf-8')
+            update = telebot.types.Update.de_json(json_string)
+            bot.process_new_updates([update])
+            return 'ok'
+        return 'wrong content-type'
+
+    # 👇 это важно (для браузера)
+    return 'Bot is running'
+
+bot.remove_webhook()
+bot.set_webhook(url=webhook_url)
+
+if __name__ == "__main__":
+    app.run()
