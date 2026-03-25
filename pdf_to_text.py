@@ -1,6 +1,7 @@
 from pdfminer.high_level import extract_pages
 from pdfminer.layout import LTTextContainer
 import PyPDF2
+from typing import Dict, List
 
 def pdf_to_text(pdf_path: str) -> Dict[int, List[str]]:
     '''
