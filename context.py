@@ -1,4 +1,5 @@
 import re
+from typing import Dict, List
 
 def find_sentence(book: Dict[int, List[str]], page: int, line: int) -> str:
     '''
