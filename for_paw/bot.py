@@ -8,7 +8,7 @@ from context import find_sentence
 from unique import unique_prediction
 from stats import all_stats
 
-token = '8788891470:AAFr487oaCLT4rj2EU2lg6QNFahORJo0W_o'
+token = 'bot token'
 bot = telebot.TeleBot(token)
 db_path = 'divinations.db'
 user_state = {}
@@ -249,8 +249,6 @@ def webhook():
             bot.process_new_updates([update])
             return 'ok'
         return 'wrong content-type'
-
-    # 👇 это важно (для браузера)
     return 'Bot is running'
 
 bot.remove_webhook()
