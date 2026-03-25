@@ -1,5 +1,6 @@
 from collections import Counter
 from lemmatize import lemmatize_text
+from typing import List
 
 def unique_prediction(pred: str, lemmas: List[str]) -> float:
     '''
