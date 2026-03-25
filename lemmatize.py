@@ -2,6 +2,7 @@ import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from pymorphy3 import MorphAnalyzer
+from typing import List
 
 nltk.download('punkt')
 nltk.download('punkt_tab')
