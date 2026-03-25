@@ -1,6 +1,7 @@
 import telebot
 from telebot import types
 import sqlite3
+from typing import List, Tuple, Dict
 
 from context import find_sentence
 from unique import unique_prediction
