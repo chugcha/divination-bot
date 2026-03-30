@@ -8,8 +8,8 @@ from context import find_sentence
 from unique import unique_prediction
 from stats import all_stats
 
-token = 'bot token'
-bot = telebot.TeleBot(token)
+token = 'bot token here'
+bot = telebot.TeleBot(token, threaded=False)
 db_path = 'divinations.db'
 user_state = {}
 
@@ -119,6 +119,16 @@ def back_button() -> types.ReplyKeyboardMarkup:
     markup.add("Назад")
     return markup
 
+def save_prediction(user_id: int, book_id: int):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO Predictions (user_id, book_id)
+        VALUES (?, ?)
+    ''', (user_id, book_id))
+    conn.commit()
+    conn.close()
+
 @bot.message_handler(commands=['start'])
 def start(message: types.Message) -> None:
     '''
@@ -218,6 +228,7 @@ def handler(message: types.Message) -> None:
         state["line"] = line
         sentence = find_sentence(book, page, line)
         state["sentence"] = sentence
+        save_prediction(state["user_id"], state["book_id"])
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         markup.add("Уникальность", "Ещё предсказание")
         markup.add("Назад")
@@ -243,16 +254,12 @@ def handler(message: types.Message) -> None:
 @app.route('/' + token, methods=['GET', 'POST'])
 def webhook():
     if request.method == 'POST':
-        if request.headers.get('content-type') == 'application/json':
+        try:
             json_string = request.get_data().decode('utf-8')
             update = telebot.types.Update.de_json(json_string)
             bot.process_new_updates([update])
-            return 'ok'
-        return 'wrong content-type'
-    return 'Bot is running'
-
-bot.remove_webhook()
-bot.set_webhook(url=webhook_url)
-
-if __name__ == "__main__":
-    app.run()
+            return 'ok', 200
+        except Exception as e:
+            print(f"Error processing update: {e}")
+            return 'error', 500
+    return 'Bot is running', 200
